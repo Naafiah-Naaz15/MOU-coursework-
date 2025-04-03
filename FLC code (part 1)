@@ -1,0 +1,120 @@
+% Step 1: Clear workspace and initialize FIS
+clear all;
+close all;
+clc;
+
+disp('Fuzzy Logic Toolbox check passed. Proceeding with FLC setup...');
+
+% Set a writable working directory
+if ispc % Windows
+    workingDir = fullfile(getenv('USERPROFILE'), 'Documents', 'MATLAB');
+else % Linux/macOS
+    workingDir = fullfile(getenv('HOME'), 'Documents', 'MATLAB');
+end
+
+% Create the directory if it doesn’t exist
+if ~exist(workingDir, 'dir')
+    mkdir(workingDir);
+end
+
+% Change to the working directory
+cd(workingDir);
+disp(['Current working directory set to: ', pwd]);
+
+% Create a new Mamdani FIS
+fis = mamfis('Name', 'AAL_FLC');
+
+% Step 2: Define Inputs
+fis = addInput(fis, [-10 10], 'Name', 'TempDeviation');
+fis = addMF(fis, 'TempDeviation', 'trimf', [-10 -5 0], 'Name', 'Negative');
+fis = addMF(fis, 'TempDeviation', 'trimf', [-2 0 2], 'Name', 'Zero');
+fis = addMF(fis, 'TempDeviation', 'trimf', [0 5 10], 'Name', 'Positive');
+
+fis = addInput(fis, [0 1000], 'Name', 'LightLevel');
+fis = addMF(fis, 'LightLevel', 'trimf', [0 0 400], 'Name', 'Low');
+fis = addMF(fis, 'LightLevel', 'trimf', [300 500 700], 'Name', 'Medium');
+fis = addMF(fis, 'LightLevel', 'trimf', [600 1000 1000], 'Name', 'High');
+
+fis = addInput(fis, [0 50], 'Name', 'ActivityLevel');
+fis = addMF(fis, 'ActivityLevel', 'trimf', [0 0 20], 'Name', 'Low');
+fis = addMF(fis, 'ActivityLevel', 'trimf', [15 35 50], 'Name', 'High');
+
+% Step 3: Define Outputs
+fis = addOutput(fis, [-100 100], 'Name', 'HeaterCoolerAdj');
+fis = addMF(fis, 'HeaterCoolerAdj', 'trimf', [-100 -50 -30], 'Name', 'Cool');
+fis = addMF(fis, 'HeaterCoolerAdj', 'trimf', [-20 0 20], 'Name', 'NoChange');
+fis = addMF(fis, 'HeaterCoolerAdj', 'trimf', [30 50 100], 'Name', 'Heat');
+
+fis = addOutput(fis, [-50 50], 'Name', 'LightingAdj');
+fis = addMF(fis, 'LightingAdj', 'trimf', [-50 -30 -10], 'Name', 'Dim');
+fis = addMF(fis, 'LightingAdj', 'trimf', [-15 0 15], 'Name', 'NoChange');
+fis = addMF(fis, 'LightingAdj', 'trimf', [10 30 50], 'Name', 'Brighten');
+
+% Step 4: Define Fuzzy Rules as Matrix
+try
+    ruleMatrix = [
+        1 0 1 3 2 1.0 1  % TD=Neg & AL=Low -> HCA=Heat, LA=NoChange
+        1 0 2 3 3 1.0 1  % TD=Neg & AL=High -> HCA=Heat, LA=Brighten
+        3 3 0 1 1 0.9 1  % TD=Pos & LL=High -> HCA=Cool, LA=Dim
+        3 1 0 1 3 0.8 2  % TD=Pos | LL=Low -> HCA=Cool, LA=Brighten
+        2 1 2 2 3 0.9 1  % TD=Zero & LL=Low & AL=High -> HCA=NoChange, LA=Brighten
+        2 2 1 2 2 1.0 1  % TD=Zero & LL=Medium & AL=Low -> HCA=NoChange, LA=NoChange
+        2 3 1 2 1 0.7 2  % TD=Zero & LL=High | AL=Low -> HCA=NoChange, LA=Dim
+        3 2 0 1 2 0.9 1  % TD=Pos & LL=Medium -> HCA=Cool, LA=NoChange
+        1 3 0 3 1 0.8 2  % TD=Neg | LL=High -> HCA=Heat, LA=Dim
+        3 0 2 1 3 1.0 1  % TD=Pos & AL=High -> HCA=Cool, LA=Brighten
+    ];
+    fis = addRule(fis, ruleMatrix);
+catch ME
+    disp('Error defining rules:');
+    disp(ME.message);
+    return;
+end
+
+% Step 5: Configure FIS Properties
+fis.DefuzzificationMethod = 'centroid';
+fis.AndMethod = 'min';
+fis.OrMethod = 'max';
+fis.ImplicationMethod = 'min';
+fis.AggregationMethod = 'max';
+
+% Step 6: Visualize Membership Functions
+figure;
+subplot(2, 3, 1); plotmf(fis, 'input', 1); title('Temp Deviation (TD)');
+subplot(2, 3, 2); plotmf(fis, 'input', 2); title('Light Level (LL)');
+subplot(2, 3, 3); plotmf(fis, 'input', 3); title('Activity Level (AL)');
+subplot(2, 3, 4); plotmf(fis, 'output', 1); title('Heater/Cooler Adj (HCA)');
+subplot(2, 3, 5); plotmf(fis, 'output', 2); title('Lighting Adj (LA)');
+sgtitle('Membership Functions');
+
+% Step 7: Test the FLC
+input = [4, 300, 10];
+output = evalfis(fis, input);
+disp('Sample Input: TD = 4°C, LL = 300 lux, AL = 10 units');
+disp(['Heater/Cooler Adjustment (HCA): ', num2str(output(1))]);
+disp(['Lighting Adjustment (LA): ', num2str(output(2))]);
+
+% Step 8: Visualize Rule Activation and Surfaces
+disp('Opening Rule Viewer (will be deprecated). Use Fuzzy Logic Designer in future MATLAB versions.');
+figure;
+ruleview(fis); % Manually input [4, 300, 10] in GUI
+figure; gensurf(fis, [1 2], 1); title('TD vs LL -> HCA');
+figure; gensurf(fis, [1 3], 2); title('TD vs AL -> LA');
+
+% Step 9: Save FIS with Explicit Path
+fisFile = 'AAL_FLC.fis';
+fullPath = fullfile(workingDir, fisFile);
+try
+    writeFIS(fis, fullPath);
+    disp(['FIS saved as ', fullPath]);
+catch ME
+    disp('Error saving FIS file:');
+    disp(ME.message);
+    disp(['Working directory: ', workingDir]);
+    disp('Please ensure the directory is writable or specify a different path.');
+end
+
+%%
+fuzzyLogicDesigner('AAL_FLC.fis')
+
+fuzzyLogicDesigner(fis);
